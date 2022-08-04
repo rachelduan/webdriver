@@ -4,21 +4,24 @@
 import os
 import random
 import time
+import urllib
 import logging
+
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+import requests
+import pandas as pd
+from bs4 import BeautifulSoup as bs
+import bs4
 
 from utils import load_text
 
 logging.getLogger().setLevel(logging.INFO)
 
-data_dir = './data'
-query_path = os.path.join(data_dir, 'test')
 
-
-def load_queries(dedup=True, shuffle=False):
+def load_queries(query_path, dedup=True, shuffle=False):
     queries = load_text(query_path, dedup, shuffle)
     return queries
 
@@ -26,7 +29,7 @@ def load_queries(dedup=True, shuffle=False):
 class SpiderBoy(object):
     def __init__(self, start_url):
         op = webdriver.ChromeOptions()
-        # op.add_argument('--headless')
+        op.add_argument('--headless')
         self.driver = webdriver.Chrome(options=op)
         self.start_url = start_url
         self.driver.get(start_url)
@@ -86,7 +89,6 @@ class SpiderBoy(object):
         while True:
             logging.info('\trunning on page {}'.format(page))
             elements = self.find_name_by_classname("c-container")
-            print(elements)
             for element in elements:
                 headlines.append(self.get_text_by_tag(element, "a"))
                 contents.append(self.get_text_by_classname(element, "content-right_8Zs40"))
@@ -100,11 +102,11 @@ class SpiderBoy(object):
             page += 1
         return headlines, contents
     
-    def run_queries(self, pages_per_query=2):
+    def run_queries(self, query_path, pages_per_query=2):
         crawled_items = []
         self.reinit_homepage()
         processed = 0
-        for query in load_queries():
+        for query in load_queries(query_path):
             spider_obj = {}
             spider_obj['query'] = query
             try:
@@ -125,7 +127,50 @@ class SpiderBoy(object):
         return crawled_items
 
 
-if __name__ == "__main__":
-    spider = SpiderBoy('http://www.baidu.com')
-    crawled_items = spider.run_queries()
+class StaticCrawler:
+	def __init__(self):
+        self.params = { 
+	        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/67.0.3396.99 Safari/537.36' 
+        }
+	
+	def _get_page(self, content):
+		url = 'https://baike.baidu.com/item/' + urllib.parse.quote(content)
+		req = requests.get(url, headers=self.params)
+		return bs(req.text, "html.parser")
+
+	def _parse_summary(self, html_obj):
+		summary = html_obj.find("div", class_="lemma-summary")
+		if not summary:
+			return ""
+		summary_components = summary.find("div", class_="para")
+		if not summary_components:
+			return ""
+		summary_component_text = []
+		for component in summary_components:
+			if isinstance(component, bs4.element.NavigableString) \
+				or component.get("class") == "_blank" \
+				or component.get("target") == "_blank":
+				summary_component_text.append(component.get_text().strip())
+		return "".join(summary_component_text)
+	
+	def _parse_basic_info(self, html_obj):
+		basic_info = [
+			html_obj.find("dl", class_="basicInfo-block basicInfo-left"),
+			html_obj.find("dl", class_="basicInfo-block basicInfo-right")
+		]
+		basic_info_obj = {}
+		for info in basic_info:
+			if not info:
+				continue
+			dts = info.find_all("dt", class_="basicInfo-item name")
+			dds = info.find_all("dd", class_="basicInfo-item value")
+			for dt, dd in zip(dts, dds):
+				basic_info_obj[dt.text.strip().replace(u'\xa0', '')] = ''.join(dd.find_all(text=True, recursive=False)).strip()
+		return basic_info_obj
+	
+	def fetch_info(self, kw):
+		soup_obj = self._get_page(kw)
+		summary = self._parse_summary(soup_obj)
+		basic_info = self._parse_basic_info(soup_obj)
+		return summary, basic_info
 

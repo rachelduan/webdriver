@@ -3,6 +3,8 @@
 import sys
 import random
 
+import pandas as pd
+
 def load_text(filename, dedup=False, shuffle=False):
     text = []
     for line in open(filename):
@@ -14,6 +16,10 @@ def load_text(filename, dedup=False, shuffle=False):
     if shuffle:
         random.shuffle(text)
     return text
+
+
+def load_csv(filename):
+	return pd.read_csv(filename, usecols=["index", "brand", "description"])
 
 
 if __name__ == "__main__":
